@@ -1,6 +1,6 @@
 /* sma1301.c -- sma1301 ALSA SoC Audio driver
  *
- * r011, 2019.05.29	- initial version  sma1301
+ * r012, 2019.07.16	- initial version  sma1301
  *
  * Copyright 2018 Silicon Mitus Corporation / Iron Device Corporation
  *
@@ -99,10 +99,19 @@ PLL_MATCH("1.536MHz",  "24.576MHz", 1536000,  0x07, 0xE0, 0x00, 0x00, 0x03),
 PLL_MATCH("3.072MHz",  "24.576MHz", 3072000,  0x07, 0x70, 0x00, 0x00, 0x03),
 PLL_MATCH("6.144MHz",  "24.576MHz", 6144000,  0x07, 0x70, 0x00, 0x00, 0x07),
 PLL_MATCH("12.288MHz", "24.576MHz", 12288000, 0x07, 0x70, 0x00, 0x00, 0x0B),
-PLL_MATCH("19.2MHz",   "24.343MHz", 19200000, 0x07, 0x71, 0x00, 0x00, 0x0A),
+PLL_MATCH("19.2MHz",   "24.343MHz", 19200000, 0x07, 0x47, 0x00, 0x00, 0x0A),
 PLL_MATCH("24.576MHz", "24.576MHz", 24576000, 0x07, 0x70, 0x00, 0x00, 0x0F),
 };
 
+static struct sma1301_pll_match sma1301_pll_matches_shift[] = {
+/* in_clk_name, out_clk_name, input_clk post_n, n, f1, f2, f3_p_cp */
+PLL_MATCH("1.536MHz",  "24.576MHz", 1536000,  0x06, 0xC0, 0x00, 0x00, 0x03),
+PLL_MATCH("3.072MHz",  "24.576MHz", 3072000,  0x06, 0x60, 0x00, 0x00, 0x03),
+PLL_MATCH("6.144MHz",  "24.576MHz", 6144000,  0x06, 0x60, 0x00, 0x00, 0x07),
+PLL_MATCH("12.288MHz", "24.576MHz", 12288000, 0x06, 0x60, 0x00, 0x00, 0x0B),
+PLL_MATCH("19.2MHz",   "24.4MHz",   19200000, 0x06, 0x3D, 0x00, 0x00, 0x0A),
+PLL_MATCH("24.576MHz", "24.576MHz", 24576000, 0x06, 0x60, 0x00, 0x00, 0x0F),
+};
 static int sma1301_startup(struct snd_soc_codec *);
 static int sma1301_shutdown(struct snd_soc_codec *);
 
@@ -2708,10 +2717,6 @@ static int sma1301_reset(struct snd_soc_codec *codec)
 			EQ_BAND4_BYPASS_MASK, EQ_BAND4_BYPASS);
 	regmap_update_bits(sma1301->regmap, SMA1301_30_EQ_GRAPHIC5,
 			EQ_BAND5_BYPASS_MASK, EQ_BAND5_BYPASS);
-	/* Apply tuning values of PWM slope control and
-	 * PWM dead time control
-	 */
-	regmap_write(sma1301->regmap, SMA1301_37_SLOPE_CTRL,	0x30);
 	/* Enable test registers */
 	regmap_write(sma1301->regmap, SMA1301_3B_TEST1, 0x5A);
 	/* Stereo idle noise improvement : Improved idle noise by
@@ -2741,24 +2746,49 @@ static int sma1301_reset(struct snd_soc_codec *codec)
 	 */
 	regmap_write(sma1301->regmap, SMA1301_94_BOOST_CTRL1,	0x05);
 	if (sma1301->rev_num <= REV_NUM_ES0) {
+		sma1301->pll_matches = sma1301_pll_matches;
+		sma1301->num_of_pll_matches =
+			ARRAY_SIZE(sma1301_pll_matches);
+		/* Apply tuning values of PWM slope control and
+		 * PWM dead time control
+		 * SPK_SLOPE - 2'b11, SPK_DEAD_TIME - 4'b1000
+		 */
+		regmap_write(sma1301->regmap, SMA1301_37_SLOPE_CTRL, 0x38);
 		/* Trimming of over current limit - 2.21A,
 		 * Trimming of loop compensation
 		 * - PI compensation, 50pF I-gain, 1.0Mohm P-gain
 		 */
 		regmap_write(sma1301->regmap, SMA1301_95_BOOST_CTRL2, 0x21);
+		/* Trimming of reference voltage - 1.19V,
+		 * boost voltage - 5.6V, minimum on-time - 62ns
+		 */
+		regmap_write(sma1301->regmap, SMA1301_97_BOOST_CTRL4,	0xA6);
 	} else {
+		sma1301->pll_matches = sma1301_pll_matches_shift;
+		sma1301->num_of_pll_matches =
+			ARRAY_SIZE(sma1301_pll_matches_shift);
+		/* Apply tuning values of PWM slope control and
+		 * PWM dead time control
+		 * SPK_SLOPE - 2'b00, SPK_DEAD_TIME - 4'b0000
+		 */
+		regmap_write(sma1301->regmap, SMA1301_37_SLOPE_CTRL, 0x00);
+		/* Enable fast off drive speaker */
+		regmap_update_bits(sma1301->regmap, SMA1301_3F_ATEST2,
+					FAST_OFF_DRIVE_SPK_MASK,
+					FAST_OFF_DRIVE_SPK_ENABLE);
 		/* Trimming of over current limit - 2.21A,
 		 * Trimming of loop compensation
 		 * - PI compensation, 65pF I-gain, 1.0Mohm P-gain
 		 */
 		regmap_write(sma1301->regmap, SMA1301_95_BOOST_CTRL2, 0x29);
+		/* Trimming of reference voltage - 1.2V,
+		 * boost voltage - 5.6V, minimum on-time - 62ns
+		 */
+		regmap_write(sma1301->regmap, SMA1301_97_BOOST_CTRL4,	0x86);
 	}
 	/* Trimming of driver deadtime - 0.75ns, switching slew - 2.5ns */
 	regmap_write(sma1301->regmap, SMA1301_96_BOOST_CTRL3,	0xF3);
-	/* Trimming of reference voltage - 1.19V,
-	 * boost voltage - 5.6V, minimum on-time - 62ns
-	 */
-	regmap_write(sma1301->regmap, SMA1301_97_BOOST_CTRL4,	0xA6);
+
 	sma1301->bst_vol_lvl_status = (TRM_VBST_5P6 >> 2);
 
 	if (sma1301->src_bypass == true) {
@@ -2982,7 +3012,7 @@ static int sma1301_i2c_probe(struct i2c_client *client,
 	u32 value, value_clk;
 	unsigned int version_status;
 
-	dev_info(&client->dev, "%s is here. Driver version REV011\n", __func__);
+	dev_info(&client->dev, "%s is here. Driver version REV012\n", __func__);
 
 	sma1301 = devm_kzalloc(&client->dev, sizeof(struct sma1301_priv),
 							GFP_KERNEL);
@@ -3102,8 +3132,6 @@ static int sma1301_i2c_probe(struct i2c_client *client,
 	sma1301->devtype = id->driver_data;
 	sma1301->dev = &client->dev;
 	sma1301->kobj = &client->dev.kobj;
-	sma1301->pll_matches = sma1301_pll_matches;
-	sma1301->num_of_pll_matches = ARRAY_SIZE(sma1301_pll_matches);
 
 	i2c_set_clientdata(client, sma1301);
 

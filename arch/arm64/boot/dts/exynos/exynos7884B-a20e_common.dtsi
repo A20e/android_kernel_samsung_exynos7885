@@ -1427,11 +1427,11 @@ usi_mode = "hsi2c0" or "hsi2c1" or "spi" or "uart"
 		gp2ap110s,ps_low_th_1 = <370>;
 		gp2ap110s,led_reg_val_2 = <0x24>; /* If proximity close detection test fails */
 		gp2ap110s,ps_high_th_2 = <400>;
-		gp2ap110s,ps_low_th_2 = <200>;
+		gp2ap110s,ps_low_th_2 = <240>;
 		gp2ap110s,settings_thd_low = <130>;
 		gp2ap110s,settings_thd_high = <550>;
-		gp2ap110s,force_close_thd_low = <520>;
-		gp2ap110s,force_close_thd_high = <750>;
+		gp2ap110s,force_close_thd_low = <350>;
+		gp2ap110s,force_close_thd_high = <530>;
 		gp2ap110s,gpio_int = <&gpa0 4 0>;
 	};
 };

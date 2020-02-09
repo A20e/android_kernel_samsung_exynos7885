@@ -714,7 +714,7 @@ static int transports_init(struct mxman *mxman)
 	 * Allocate & Initialise Infrastructre Config Structure
 	 * including the mx management stack config information.
 	 */
-	mxconf = miframman_alloc(scsc_mx_get_ramman(mx), sizeof(struct mxconf), 4);
+	mxconf = miframman_alloc(scsc_mx_get_ramman(mx), sizeof(struct mxconf), 4, MIFRAMMAN_OWNER_COMMON);
 	if (!mxconf) {
 		SCSC_TAG_ERR(MXMAN, "miframman_alloc() failed\n");
 		gdb_transport_release(scsc_mx_get_gdb_transport_m4(mx));
@@ -968,7 +968,7 @@ static int mxman_start(struct mxman *mxman)
 	start_mifram_heap = (char *)start_dram + fwhdr->fw_runtime_length;
 	length_mifram_heap = size_dram - fwhdr->fw_runtime_length;
 
-	miframman_init(scsc_mx_get_ramman(mxman->mx), start_mifram_heap, length_mifram_heap);
+	miframman_init(scsc_mx_get_ramman(mxman->mx), start_mifram_heap, length_mifram_heap, start_dram);
 	mifmboxman_init(scsc_mx_get_mboxman(mxman->mx));
 	mifintrbit_init(scsc_mx_get_intrbit(mxman->mx), mif);
 
@@ -1433,6 +1433,12 @@ static void mxman_failure_work(struct work_struct *work)
 							 mxman->last_panic_rec_sz,
 							 panic_record_dump + used,
 							 PANIC_RECORD_DUMP_BUFFER_SZ - used);
+
+				/* Print the host code/reason again so it's near the FW panic
+				 * record in the kernel log
+				 */
+				print_panic_code(mxman->scsc_panic_code);
+				SCSC_TAG_INFO(MXMAN, "Reason: '%s'\n", mxman->failure_reason[0] ? mxman->failure_reason : "<null>");
 
 				blocking_notifier_call_chain(&firmware_chain,
 							     SCSC_FW_EVENT_MOREDUMP_COMPLETE,

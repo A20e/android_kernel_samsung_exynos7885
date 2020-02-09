@@ -466,6 +466,10 @@
 #define THERMAL_160_120 (1<<5)
 #define THERMAL_140_100 (2<<5)
 
+#define FAST_OFF_DRIVE_SPK_MASK (1<<0)
+#define FAST_OFF_DRIVE_SPK_DISABLE (0<<0)
+#define FAST_OFF_DRIVE_SPK_ENABLE (1<<0)
+
 /* PLL_LDO_CTRL,PLL_POST_N : 0x8B */
 #define PLL_EN_MASK (1<<5)
 #define PLL_EN_DISABLE (0<<5)

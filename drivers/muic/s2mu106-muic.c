@@ -83,6 +83,7 @@ static void s2mu106_muic_set_rid_for_water(struct s2mu106_muic_data *muic_data, 
 static void s2mu106_muic_set_rid_int_mask_en(struct s2mu106_muic_data *muic_data, bool en);
 #endif
 void s2mu106_muic_get_detect_info(struct s2mu106_muic_data *muic_data);
+static bool s2mu106_muic_is_opmode_typeC(struct s2mu106_muic_data *muic_data);
 
 /*
  * Debuging functions
@@ -580,7 +581,7 @@ void s2mu106_muic_get_detect_info(struct s2mu106_muic_data *muic_data)
 	muic_data->reg[DEVICE_TYPE3] = s2mu106_i2c_read_byte(i2c, S2MU106_REG_DEVICE_TYP3);
 	muic_data->reg[DEVICE_APPLE] = s2mu106_i2c_read_byte(i2c, S2MU106_REG_DEVICE_APPLE);
 	muic_data->reg[CHG_TYPE] = s2mu106_i2c_read_byte(i2c, S2MU106_REG_CHG_TYP);
-    muic_data->reg[ADC] = _s2mu106_muic_get_rid_adc(muic_data);
+	muic_data->reg[ADC] = _s2mu106_muic_get_rid_adc(muic_data);
 	muic_data->vbvolt = muic_pdata->vbvolt = _s2mu106_muic_get_vbus_state(muic_data);
 	muic_data->adc = muic_pdata->adc = muic_data->reg[ADC];
 
@@ -654,6 +655,47 @@ skip_dcd_recheck:
 	mutex_unlock(&muic_data->bcd_rescan_mutex);
 }
 
+static void s2mu106_muic_rescan_validity_checker(struct work_struct *work)
+{
+	struct s2mu106_muic_data *muic_data =
+		container_of(work, struct s2mu106_muic_data, rescan_validity_checker.work);
+	struct muic_platform_data *muic_pdata = muic_data->pdata;
+	struct muic_interface_t *muic_if = muic_data->if_data;
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
+	u8 reg_val = 0;
+#endif
+
+	pr_info("%s entered\n", __func__);
+
+	if (!_s2mu106_muic_get_vbus_state(muic_data)
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
+			|| !muic_data->is_cable_inserted
+#endif
+			) {
+		return;
+	} else if (muic_if->is_bypass) {
+		pr_info("%s is_bypass(%d)\n", __func__, muic_if->is_bypass);
+		return;
+	}
+
+	if (!MUIC_IS_ATTACHED(muic_pdata->attached_dev)) {
+		pr_info("%s detected dev(%s)\n", __func__, dev_to_str(muic_pdata->attached_dev));
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
+		reg_val = s2mu106_i2c_read_byte(muic_data->i2c, S2MU106_REG_MUIC_CTRL2);
+		if (reg_val & MUIC_CTRL2_ADC_OFF_MASK) {
+			muic_data->invalid_rescanned = true;
+		}
+#else
+#if !IS_ENABLED(CONFIG_SEC_FACTORY)
+		pr_info("TIMEOUT DETECTED\n");
+		muic_data->new_dev = ATTACHED_DEV_TIMEOUT_OPEN_MUIC;
+		muic_data->is_timeout_attached = true;
+		s2mu106_muic_handle_attached_dev(muic_data);
+#endif
+#endif
+	}
+}
+
 /*
  * Interface Functions
  */
@@ -667,8 +709,10 @@ static int s2mu106_if_get_adc(void *mdata)
 
 	ret = _s2mu106_muic_get_rid_adc(muic_data);
 
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	if (ret == ADC_OPEN && muic_data->is_cable_inserted)
 		ret = ADC_GND;
+#endif
 
 	mutex_unlock(&muic_data->switch_mutex);
 
@@ -877,8 +921,10 @@ exit_chk:
 	s2mu106_i2c_write_byte(i2c, S2MU106_REG_AFC_CTRL1, 0x0);
 	s2mu106_i2c_write_byte(i2c, S2MU106_REG_AFC_CTRL2, 0x0);
 
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	if (muic_data->water_status != S2MU106_WATER_MUIC_IDLE)
 		return MUIC_ABNORMAL_OTG;
+#endif
 
 	return ret;
 }
@@ -1151,19 +1197,16 @@ static int s2mu106_muic_reg_init(struct s2mu106_muic_data *muic_data)
 			0x1);
 
 	s2mu106_muic_set_rid_for_water(muic_data, MUIC_ENABLE);
+#else
+	if (s2mu106_muic_is_opmode_typeC(muic_data)) {
+		_s2mu106_muic_control_rid_adc(muic_data, MUIC_DISABLE);
+	}
 #endif
 
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL) && !IS_ENABLED(CONFIG_SEC_FACTORY)
-	/* Masking ADC, RID interrupt */
-	reg_val = s2mu106_i2c_read_byte(i2c, S2MU106_REG_MUIC_INT1_MASK);
-	reg_val |= MUIC_INT1_MASK_RID_CHG_Im_MASK;
-	s2mu106_i2c_write_byte(i2c, S2MU106_REG_MUIC_INT1_MASK, reg_val);
-
-	data = s2mu106_i2c_read_byte(i2c, S2MU106_REG_MUIC_INT2_MASK);
-	data |= MUIC_INT2_MASK_ADCCHANGE_Im_MASK;
-	s2mu106_i2c_write_byte(i2c, S2MU106_REG_MUIC_INT2_MASK, data);
-	pr_info("%s INT1_MASK(%#x), INT2_MASK(%#x)\n", __func__, reg_val, data);
-#endif
+	reg_val = s2mu106_i2c_read_byte(i2c, S2MU106_REG_TIMER_SET3);
+	reg_val &= ~(TIMER_SET3_DCDTMRSET_MASK);
+	reg_val |= TIMER_SET3_DCDTMRSET_600ms_MASK;
+	s2mu106_i2c_write_byte(i2c, S2MU106_REG_TIMER_SET3, reg_val);
 
 #if IS_ENABLED(CONFIG_VBUS_NOTIFIER)
 	vbus_notifier_handle((!!muic_data->vbvolt) ? STATUS_VBUS_HIGH : STATUS_VBUS_LOW);
@@ -1205,24 +1248,20 @@ static void s2mu106_muic_detect_dev_ccic(struct s2mu106_muic_data *muic_data,
 			pr_err("%s: Skip to detach legacy type\n", __func__);
 			return;
 		}
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 		if (!muic_data->is_cable_inserted) {
 			s2mu106_muic_set_rid_int_mask_en(muic_data, MUIC_DISABLE);
 		}
 #if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
 		if (muic_pdata->attached_dev == ATTACHED_DEV_USB_MUIC) {
-#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 			s2mu106_muic_handle_legacy_detach(muic_data);
-#endif
 		}
+#endif
 #endif
 		muic_pdata->attached_dev = ATTACHED_DEV_NONE_MUIC;
 	} else {
 		/* Attach from CCIC */
 		pr_info("%s DETECTED\n", dev_to_str(new_dev));
-
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
-		muic_data->is_timeout_attached = false;
-#endif
 
 		switch (new_dev) {
 		case ATTACHED_DEV_OTG_MUIC:
@@ -1314,16 +1353,20 @@ static int s2mu106_muic_detect_dev_bc1p2(struct s2mu106_muic_data *muic_data)
 	case DEVICE_TYP2_SDP_1P8S_MASK:
 		if (muic_data->vbvolt) {
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
-			pr_info("%s:%s: SDP_1P8S=>USB DETECTED\n", MUIC_DEV_NAME, __func__);
+			pr_info("SDP_1P8S=>USB DETECTED\n");
 			muic_data->new_dev = ATTACHED_DEV_USB_MUIC;
 #else
-			pr_info("%s:%s: SDP_1P8S DETECTED\n", MUIC_DEV_NAME, __func__);
+			pr_info("SDP_1P8S DETECTED\n");
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 			if (muic_data->rescan_cnt > 1) {
 				muic_data->new_dev = ATTACHED_DEV_TIMEOUT_OPEN_MUIC;
 			} else {
 				schedule_delayed_work(&muic_data->dcd_recheck, msecs_to_jiffies(600));
 				return S2MU106_DETECT_SKIP;
 			}
+#else
+			muic_data->new_dev = ATTACHED_DEV_TIMEOUT_OPEN_MUIC;
+#endif
 #endif
 		}
 		break;
@@ -1620,7 +1663,6 @@ static void s2mu106_muic_put_dry_chk_time(struct s2mu106_muic_data *muic_data)
 	muic_data->dry_chk_time = (long)time.tv_sec;
 }
 
-#if !IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
 static int s2mu106_muic_water_judge(struct s2mu106_muic_data *muic_data)
 {
 	int i, adc = 0;
@@ -1643,7 +1685,6 @@ static int s2mu106_muic_water_judge(struct s2mu106_muic_data *muic_data)
 
 	return adc;
 }
-#endif
 
 static void s2mu106_muic_set_water_state(struct s2mu106_muic_data *muic_data, bool en)
 {
@@ -1815,51 +1856,6 @@ static void s2mu106_muic_sleep_dry_checker(struct work_struct *work)
 	}
 }
 
-static void s2mu106_muic_rescan_validity_checker(struct work_struct *work)
-{
-	struct s2mu106_muic_data *muic_data =
-		container_of(work, struct s2mu106_muic_data, rescan_validity_checker.work);
-	struct muic_platform_data *muic_pdata = muic_data->pdata;
-#if defined(CONFIG_NONE_WATERPROOF_MODEL)
-	struct muic_interface_t *muic_if = muic_data->if_data;
-#endif
-	u8 reg_val = 0;
-
-	pr_info("%s entered\n", __func__);
-
-	if (!_s2mu106_muic_get_vbus_state(muic_data)
-#if !IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
-		|| !muic_data->is_cable_inserted
-#endif
-			) {
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
-		pr_info("%s NONE_WATERPROOF_MODEL\n", __func__);
-#else
-		pr_info("%s vbus detached while checking.\n", __func__);
-#endif
-		return;
-#if defined(CONFIG_NONE_WATERPROOF_MODEL)
-	} else if (muic_if->is_bypass) {
-		pr_info("%s is_bypass(%d)\n", __func__, muic_if->is_bypass);
-		return;
-#endif
-	}
-
-	if (!MUIC_IS_ATTACHED(muic_pdata->attached_dev)) {
-		pr_info("%s detected dev(%s)\n", __func__, dev_to_str(muic_pdata->attached_dev));
-		reg_val = s2mu106_i2c_read_byte(muic_data->i2c, S2MU106_REG_MUIC_CTRL2);
-		if (reg_val & MUIC_CTRL2_ADC_OFF_MASK) {
-			muic_data->invalid_rescanned = true;
-		}
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
-		pr_info("TIMEOUT DETECTED\n");
-		muic_data->new_dev = ATTACHED_DEV_TIMEOUT_OPEN_MUIC;
-		muic_data->is_timeout_attached = true;
-		s2mu106_muic_handle_attached_dev(muic_data);
-#endif
-	}
-}
-
 static int muic_fb_notifier_event(struct notifier_block *this,
         unsigned long val, void *v)
 {
@@ -1923,6 +1919,7 @@ static void _s2mu106_muic_resend_jig_type(struct s2mu106_muic_data *muic_data)
 		s2mu106_muic_handle_attached_dev(muic_data);
 	}
 }
+
 #if IS_ENABLED(CONFIG_MUIC_SUPPORT_CCIC)
 static bool s2mu106_muic_is_opmode_typeC(struct s2mu106_muic_data *muic_data)
 {
@@ -2098,8 +2095,8 @@ static irqreturn_t s2mu106_muic_vbus_on_isr(int irq, void *data)
 
 	pr_info("%s start(%s)\n", __func__, dev_to_str(muic_pdata->attached_dev));
 
-#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	s2mu106_muic_get_detect_info(muic_data);
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	if (s2mu106_muic_is_opmode_typeC(muic_data)) {
 		muic_data->invalid_rescanned = false;
 		cancel_delayed_work(&muic_data->rescan_validity_checker);
@@ -2119,6 +2116,11 @@ static irqreturn_t s2mu106_muic_vbus_on_isr(int irq, void *data)
 	}
 #else
 	muic_pdata->vbvolt = muic_data->vbvolt = _s2mu106_muic_get_vbus_state(muic_data);
+	if (s2mu106_muic_is_opmode_typeC(muic_data)) {
+		cancel_delayed_work(&muic_data->rescan_validity_checker);
+		schedule_delayed_work(&muic_data->rescan_validity_checker,
+			msecs_to_jiffies(1200));
+	}
 #endif
 
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER) && IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
@@ -2179,12 +2181,11 @@ static irqreturn_t s2mu106_muic_vbus_off_isr(int irq, void *data)
 		muic_data->invalid_rescanned = false;
 	}
 #endif
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
 	if (muic_data->is_timeout_attached) {
 		muic_data->is_timeout_attached = false;
-		muic_core_handle_detach(muic_data->pdata);
+		if (muic_pdata->attached_dev == ATTACHED_DEV_TIMEOUT_OPEN_MUIC)
+			muic_core_handle_detach(muic_data->pdata);
 	}
-#endif
 
 	pr_info("%s done(%s)\n", __func__, dev_to_str(muic_pdata->attached_dev));
 
@@ -2232,9 +2233,7 @@ static irqreturn_t s2mu106_muic_adc_change_isr(int irq, void *data)
 	struct s2mu106_muic_data *muic_data = data;
 	struct muic_platform_data *muic_pdata;
 #if IS_ENABLED(CONFIG_MUIC_MANAGER)
-#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	struct muic_interface_t *muic_if;
-#endif
 #endif
 
 	if (muic_data == NULL) {
@@ -2250,14 +2249,12 @@ static irqreturn_t s2mu106_muic_adc_change_isr(int irq, void *data)
 	}
 
 #if IS_ENABLED(CONFIG_MUIC_MANAGER)
-#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	muic_if = muic_data->if_data;
 
 	if (muic_if == NULL) {
 		pr_err("%s data NULL\n", __func__);
 		return IRQ_NONE;
 	}
-#endif
 #endif
 
 	mutex_lock(&muic_data->muic_mutex);
@@ -2273,21 +2270,11 @@ static irqreturn_t s2mu106_muic_adc_change_isr(int irq, void *data)
 
 #if IS_ENABLED(CONFIG_MUIC_MANAGER)
 	if (muic_if->opmode & OPMODE_CCIC) {
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
- 		pr_info("%s, water det is skipeed, non waterproof model, adc : %d\n",
-				__func__, muic_data->adc);
-		if ((IS_WATER_ADC(muic_data->adc)
-			|| (muic_data->adc & ADC_CONVERSION_ERR_MASK))
-			&& (!muic_data->vbvolt)) {
-				pr_info("%s, water detected\n",	__func__);
-		}
-		goto exit_adc_chg;
-#else
 #if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 		if ((IS_WATER_ADC(muic_data->adc)
-			|| (muic_data->adc & ADC_CONVERSION_ERR_MASK))
-			&& (!muic_data->vbvolt)
-			&& (muic_data->water_status == S2MU106_WATER_MUIC_IDLE)) {
+				|| (muic_data->adc & ADC_CONVERSION_ERR_MASK))
+				&& (!muic_data->vbvolt)
+				&& (muic_data->water_status == S2MU106_WATER_MUIC_IDLE)) {
 			muic_data->water_status = S2MU106_WATER_MUIC_VERIFY;
 			msleep(100);
 			muic_data->adc = s2mu106_muic_water_judge(muic_data);
@@ -2301,7 +2288,6 @@ static irqreturn_t s2mu106_muic_adc_change_isr(int irq, void *data)
 				muic_data->water_status = S2MU106_WATER_MUIC_IDLE;
 			}
 		}
-#endif
 #endif
 	} else {
 		s2mu106_muic_detect_dev_rid_array(muic_data);
@@ -2326,7 +2312,7 @@ static irqreturn_t s2mu106_muic_adc_change_isr(int irq, void *data)
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_MUIC_MANAGER)
+#if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 exit_adc_chg:
 #endif
 	wake_unlock(&muic_data->wake_lock);
@@ -2480,9 +2466,7 @@ static void s2mu106_muic_init_drvdata(struct s2mu106_muic_data *muic_data,
 #endif
 	muic_data->is_cable_inserted = false;
 #endif
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
 	muic_data->is_timeout_attached = false;
-#endif
 }
 
 static void s2mu106_muic_init_interface(struct s2mu106_muic_data *muic_data,
@@ -2640,6 +2624,8 @@ static int s2mu106_muic_probe(struct platform_device *pdev)
 	pr_info("%s muic_if->opmode(%d)\n", __func__, muic_if->opmode);
 
 	INIT_DELAYED_WORK(&muic_data->dcd_recheck, s2mu106_muic_dcd_recheck);
+	INIT_DELAYED_WORK(&muic_data->rescan_validity_checker,
+		s2mu106_muic_rescan_validity_checker);
 
 #if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	init_waitqueue_head(&muic_data->wait);
@@ -2651,8 +2637,6 @@ static int s2mu106_muic_probe(struct platform_device *pdev)
 		s2mu106_muic_water_detect_handler);
 	INIT_DELAYED_WORK(&muic_data->sleep_dry_checker,
 		s2mu106_muic_sleep_dry_checker);
-	INIT_DELAYED_WORK(&muic_data->rescan_validity_checker,
-		s2mu106_muic_rescan_validity_checker);
 
 	mutex_init(&muic_data->water_det_mutex);
 	mutex_init(&muic_data->water_dry_mutex);
@@ -2682,34 +2666,33 @@ static int s2mu106_muic_probe(struct platform_device *pdev)
 		s2mu106_muic_adc_change_isr(-1, muic_data);
 	} else {
 		s2mu106_muic_get_detect_info(muic_data);
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
-		cancel_delayed_work(&muic_data->rescan_validity_checker);
-		schedule_delayed_work(&muic_data->rescan_validity_checker,
-			msecs_to_jiffies(1200));
-#endif
 #if IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 		/* Initial Check */
 		if (muic_data->rescan_cnt == 0
-			&& muic_data->vbvolt
-			&& muic_data->adc == ADC_GND
-			&& !muic_core_get_ccic_cable_state(muic_pdata)
-			&& !IS_WATER_STATUS(muic_data->water_status)) {
+				&& muic_data->vbvolt
+				&& muic_data->adc == ADC_GND
+				&& !muic_core_get_ccic_cable_state(muic_pdata)
+				&& !IS_WATER_STATUS(muic_data->water_status)) {
 			/* In case of normal charger cable */
 			s2mu106_muic_bcd_rescan(muic_data);
 		} else if (!muic_data->is_cable_inserted
-			&& muic_data->adc == ADC_GND) {
+				&& muic_data->adc == ADC_GND) {
 			/* In case of OTG */
 			muic_data->is_cable_inserted = true;
 			wake_up_interruptible(&muic_data->cable_wait);
 		} else if (muic_data->adc != ADC_GND
-			&& !_s2mu106_muic_get_vbus_state(muic_data)) {
+				&& !_s2mu106_muic_get_vbus_state(muic_data)) {
 			/* In case of None Cable
 			 * Need to check the water.
 			 */
 			muic_data->adc = _s2mu106_muic_recheck_adc(muic_data);
 		}
 #else
+		s2mu106_muic_bcd_rescan(muic_data);
 		s2mu106_muic_attach_isr(-1, muic_data);
+		cancel_delayed_work(&muic_data->rescan_validity_checker);
+		schedule_delayed_work(&muic_data->rescan_validity_checker,
+			msecs_to_jiffies(1200));
 #endif
 	}
 	return 0;

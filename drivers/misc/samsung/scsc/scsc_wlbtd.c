@@ -25,6 +25,45 @@ static struct wake_lock wlbtd_wakelock;
 /* module parameter controlling recovery handling */
 extern int disable_recovery_handling;
 
+const char *response_code_to_str(int response_code)
+{
+	switch (response_code) {
+	case SCSC_WLBTD_ERR_PARSE_FAILED:
+		return "SCSC_WLBTD_ERR_PARSE_FAILED";
+	case SCSC_WLBTD_FW_PANIC_TAR_GENERATED:
+		return "SCSC_WLBTD_FW_PANIC_TAR_GENERATED";
+	case SCSC_WLBTD_FW_PANIC_ERR_SCRIPT_FILE_NOT_FOUND:
+		return "SCSC_WLBTD_FW_PANIC_ERR_SCRIPT_FILE_NOT_FOUND";
+	case SCSC_WLBTD_FW_PANIC_ERR_NO_DEV:
+		return "SCSC_WLBTD_FW_PANIC_ERR_NO_DEV";
+	case SCSC_WLBTD_FW_PANIC_ERR_MMAP:
+		return "SCSC_WLBTD_FW_PANIC_ERR_MMAP";
+	case SCSC_WLBTD_FW_PANIC_ERR_SABLE_FILE:
+		return "SCSC_WLBTD_FW_PANIC_ERR_SABLE_FILE";
+	case SCSC_WLBTD_FW_PANIC_ERR_TAR:
+		return "SCSC_WLBTD_FW_PANIC_ERR_TAR";
+	case SCSC_WLBTD_OTHER_SBL_GENERATED:
+		return "SCSC_WLBTD_OTHER_SBL_GENERATED";
+	case SCSC_WLBTD_OTHER_TAR_GENERATED:
+		return "SCSC_WLBTD_OTHER_TAR_GENERATED";
+	case SCSC_WLBTD_OTHER_ERR_SCRIPT_FILE_NOT_FOUND:
+		return "SCSC_WLBTD_OTHER_ERR_SCRIPT_FILE_NOT_FOUND";
+	case SCSC_WLBTD_OTHER_ERR_NO_DEV:
+		return "SCSC_WLBTD_OTHER_ERR_NO_DEV";
+	case SCSC_WLBTD_OTHER_ERR_MMAP:
+		return "SCSC_WLBTD_OTHER_ERR_MMAP";
+	case SCSC_WLBTD_OTHER_ERR_SABLE_FILE:
+		return "SCSC_WLBTD_OTHER_ERR_SABLE_FILE";
+	case SCSC_WLBTD_OTHER_ERR_TAR:
+		return "SCSC_WLBTD_OTHER_ERR_TAR";
+	case SCSC_WLBTD_OTHER_IGNORE_TRIGGER:
+		return "SCSC_WLBTD_OTHER_IGNORE_TRIGGER";
+	default:
+		SCSC_TAG_ERR(WLBTD, "UNKNOWN response_code %d", response_code);
+		return "UNKNOWN response_code";
+	}
+}
+
 /**
  * This callback runs whenever the socket receives messages.
  */
@@ -42,7 +81,8 @@ static int msg_from_wlbtd_cb(struct sk_buff *skb, struct genl_info *info)
 			SCSC_TAG_ERR(WLBTD, "ATTR_INT: %u\n", status);
 	}
 
-	complete(&event_done);
+	if (!completion_done(&event_done))
+		complete(&event_done);
 
 	return 0;
 }
@@ -57,8 +97,7 @@ static int msg_from_wlbtd_sable_cb(struct sk_buff *skb, struct genl_info *info)
 
 	if (info->attrs[2]) {
 		status = nla_get_u16(info->attrs[2]);
-		if (status)
-			SCSC_TAG_ERR(WLBTD, "%u\n", status);
+		SCSC_TAG_ERR(WLBTD, "%s\n", response_code_to_str(status));
 	}
 
 	if (disable_recovery_handling == MEMDUMP_FILE_FOR_RECOVERY) {
@@ -70,14 +109,72 @@ static int msg_from_wlbtd_sable_cb(struct sk_buff *skb, struct genl_info *info)
 		}
 	}
 
-	if (strstr(data, "scsc_log_fw_panic") != NULL) {
-		SCSC_TAG_INFO(WLBTD, "completing fw_panic_done\n");
-		complete(&fw_panic_done);
-	}
+	/* completion cases :
+	 * 1) FW_PANIC_TAR_GENERATED
+	 *    for trigger scsc_log_fw_panic only one response from wlbtd when
+	 *    tar done
+	 *    ---> complete fw_panic_done
+	 * 2) for all other triggers, we get 2 responses
+	 *	a) OTHER_SBL_GENERATED
+	 *	   Once .sbl is written
+	 *    ---> complete event_done
+	 *	b) OTHER_TAR_GENERATED
+	 *	   2nd time when sable tar is done
+	 *	   IGNORE this response and Don't complete
+	 * 3) OTHER_IGNORE_TRIGGER
+	 *    When we get rapid requests for SABLE generation,
+	 *    to serialise while processing current request,
+	 *    we ignore requests other than "fw_panic" in wlbtd and
+	 *    send a msg "ignoring" back to kernel.
+	 *    ---> complete event_done
+	 * 4) FW_PANIC_ERR_* and OTHER_ERR_*
+	 *    when something failed, file not found, mmap failed, etc.
+	 *    ---> complete the completion with waiter(s) based on if it was
+	 *    a fw_panic trigger or other trigger
+	 * 5) ERR_PARSE_FAILED
+	 *    When msg parsing fails, wlbtd doesn't know the trigger type
+	 *    ---> complete the completion with waiter(s)
+	 */
 
-	if (strstr(data, ".sbl") != NULL) {
-		SCSC_TAG_INFO(WLBTD, "completing event_done\n");
-		complete(&event_done);
+	switch (status) {
+	case SCSC_WLBTD_ERR_PARSE_FAILED:
+		if (!completion_done(&fw_panic_done)) {
+			SCSC_TAG_INFO(WLBTD, "completing fw_panic_done\n");
+			complete(&fw_panic_done);
+		}
+		if (!completion_done(&event_done)) {
+			SCSC_TAG_INFO(WLBTD, "completing event_done\n");
+			complete(&event_done);
+		}
+		break;
+	case SCSC_WLBTD_FW_PANIC_TAR_GENERATED:
+	case SCSC_WLBTD_FW_PANIC_ERR_TAR:
+	case SCSC_WLBTD_FW_PANIC_ERR_SCRIPT_FILE_NOT_FOUND:
+	case SCSC_WLBTD_FW_PANIC_ERR_NO_DEV:
+	case SCSC_WLBTD_FW_PANIC_ERR_MMAP:
+	case SCSC_WLBTD_FW_PANIC_ERR_SABLE_FILE:
+		if (!completion_done(&fw_panic_done)) {
+			SCSC_TAG_INFO(WLBTD, "completing fw_panic_done\n");
+			complete(&fw_panic_done);
+		}
+		break;
+	case SCSC_WLBTD_OTHER_TAR_GENERATED:
+		/* ignore */
+		break;
+	case SCSC_WLBTD_OTHER_SBL_GENERATED:
+	case SCSC_WLBTD_OTHER_ERR_TAR:
+	case SCSC_WLBTD_OTHER_ERR_SCRIPT_FILE_NOT_FOUND:
+	case SCSC_WLBTD_OTHER_ERR_NO_DEV:
+	case SCSC_WLBTD_OTHER_ERR_MMAP:
+	case SCSC_WLBTD_OTHER_ERR_SABLE_FILE:
+	case SCSC_WLBTD_OTHER_IGNORE_TRIGGER:
+		if (!completion_done(&event_done)) {
+			SCSC_TAG_INFO(WLBTD, "completing event_done\n");
+			complete(&event_done);
+		}
+		break;
+	default:
+		SCSC_TAG_ERR(WLBTD, "UNKNOWN reponse from WLBTD\n");
 	}
 
 	return 0;

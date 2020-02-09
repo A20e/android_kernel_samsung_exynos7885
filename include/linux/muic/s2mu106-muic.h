@@ -461,6 +461,7 @@ enum s2mu106_muic_registers {
 #define TIMER_SET3_DCDTMRSET_2_SHIFT 		2
 #define TIMER_SET3_DCDTMRSET_1_SHIFT 		1
 #define TIMER_SET3_DCDTMRSET_0_SHIFT 		0
+#define TIMER_SET3_DCDTMRSET_SHIFT 		0
 
 #define TIMER_SET3_JIG_WAIT_TIME_2_MASK 	(0x1 << TIMER_SET3_JIG_WAIT_TIME_2_SHIFT)
 #define TIMER_SET3_JIG_WAIT_TIME_1_MASK 	(0x1 << TIMER_SET3_JIG_WAIT_TIME_1_SHIFT)
@@ -470,6 +471,8 @@ enum s2mu106_muic_registers {
 #define TIMER_SET3_DCDTMRSET_2_MASK 		(0x1 << TIMER_SET3_DCDTMRSET_2_SHIFT)
 #define TIMER_SET3_DCDTMRSET_1_MASK 		(0x1 << TIMER_SET3_DCDTMRSET_1_SHIFT)
 #define TIMER_SET3_DCDTMRSET_0_MASK 		(0x1 << TIMER_SET3_DCDTMRSET_0_SHIFT)
+#define TIMER_SET3_DCDTMRSET_MASK 		(0x7 << TIMER_SET3_DCDTMRSET_0_SHIFT)
+#define TIMER_SET3_DCDTMRSET_600ms_MASK 	(0x4 << TIMER_SET3_DCDTMRSET_SHIFT)
 
 /* S2MU106 MUIC MUIC_CTRL2 Register (0x72) */
 #define MUIC_CTRL2_WAKEUP_LOOP_SEL_SHIFT	7
@@ -983,7 +986,6 @@ struct s2mu106_muic_data {
 	struct delayed_work water_detect_handler;
 	struct delayed_work water_dry_handler;
 	struct delayed_work sleep_dry_checker;
-	struct delayed_work rescan_validity_checker;
 
 	bool invalid_rescanned;
 	struct wake_lock water_wake_lock;
@@ -1005,10 +1007,8 @@ struct s2mu106_muic_data {
 	bool lcd_on;
 	bool is_cable_inserted;
 #endif
-#if IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
+	struct delayed_work rescan_validity_checker;
 	bool is_timeout_attached;
-#endif
-
 };
 
 extern struct muic_platform_data muic_pdata;

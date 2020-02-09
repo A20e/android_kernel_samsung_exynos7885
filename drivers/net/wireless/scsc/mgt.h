@@ -469,7 +469,8 @@ void slsi_modify_ies_on_channel_switch(struct net_device *dev, struct cfg80211_a
 #ifdef CONFIG_SCSC_WLAN_WIFI_SHARING
 bool slsi_if_valid_wifi_sharing_channel(struct slsi_dev *sdev, int freq);
 void slsi_extract_valid_wifi_sharing_channels(struct slsi_dev *sdev);
-void slsi_select_wifi_sharing_ap_channel(struct wiphy *wiphy, struct net_device *dev,
+int slsi_check_if_non_indoor_channel(struct slsi_dev *sdev, int freq);
+int slsi_select_wifi_sharing_ap_channel(struct wiphy *wiphy, struct net_device *dev,
 					 struct cfg80211_ap_settings *settings, struct slsi_dev *sdev,
 					 int *wifi_sharing_channel_switched);
 int slsi_set_mib_wifi_sharing_5ghz_channel(struct slsi_dev *sdev, u16 psid, int value,
@@ -509,6 +510,11 @@ int slsi_send_hanged_vendor_event(struct slsi_dev *sdev, u16 scsc_panic_code);
 void slsi_update_supported_channels_regd_flags(struct slsi_dev *sdev);
 #ifdef CONFIG_SCSC_WLAN_HANG_TEST
 int slsi_test_send_hanged_vendor_event(struct net_device *dev);
+#endif
+#ifdef CONFIG_SLSI_WLAN_STA_FWD_BEACON
+int slsi_send_forward_beacon_vendor_event(struct slsi_dev *sdev, const u8 *ssid, const int ssid_len, const u8 *bssid,
+					  u8 channel, const u16 beacon_int, const u64 timestamp, const u64 sys_time);
+int slsi_send_forward_beacon_abort_vendor_event(struct slsi_dev *sdev, u16 reason_code);
 #endif
 void slsi_wlan_dump_public_action_subtype(struct slsi_dev *sdev, struct ieee80211_mgmt *mgmt, bool tx);
 void slsi_reset_channel_flags(struct slsi_dev *sdev);

@@ -2076,7 +2076,7 @@ static void s2mu106_vbus_short_check(struct s2mu106_usbpd_data *pdic_data)
 	pdic_data->vbus_short_check = true;
 }
 
-#if !defined(CONFIG_SEC_FACTORY)
+#if !defined(CONFIG_SEC_FACTORY) && IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 static void s2mu106_power_off_water_check(struct s2mu106_usbpd_data *pdic_data)
 {
 	struct i2c_client *i2c = pdic_data->i2c;
@@ -2128,7 +2128,6 @@ static void s2mu106_power_off_water_check(struct s2mu106_usbpd_data *pdic_data)
 		if (cc1_val == USBPD_Ra || cc2_val == USBPD_Ra)
 			break;
 		else if (retry == 2) {
-#if !IS_ENABLED(CONFIG_NONE_WATERPROOF_MODEL)
 			pdic_data->lpcharge_water = true;
 			pdic_data->is_water_detect = true;
 			pdic_data->water_detect_cnt = 0;
@@ -2137,9 +2136,6 @@ static void s2mu106_power_off_water_check(struct s2mu106_usbpd_data *pdic_data)
 			ccic_event_work(pdic_data,
 				CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_WATER, CCIC_NOTIFY_ATTACH, 1);
 			ccic_event_work(pdic_data, CCIC_NOTIFY_DEV_BATTERY, CCIC_NOTIFY_ID_WATER, 1, 0);
-#else
-			dev_info(dev, "%s, detected but it's skipped.\n", __func__);
-#endif
 		}
 		udelay(5);
 	}
@@ -2918,7 +2914,7 @@ static int s2mu106_usbpd_probe(struct i2c_client *i2c,
 		mutex_unlock(&pdic_data->_mutex);
 	}
 
-#if !defined(CONFIG_SEC_FACTORY)
+#if !defined(CONFIG_SEC_FACTORY) && IS_ENABLED(CONFIG_S2MU106_TYPEC_WATER)
 	if (lpcharge)
 		s2mu106_power_off_water_check(pdic_data);
 #endif
