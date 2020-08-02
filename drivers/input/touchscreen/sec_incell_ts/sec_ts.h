@@ -50,6 +50,9 @@
 #if defined(CONFIG_TRUSTONIC_TRUSTED_UI_QC)
 #include <linux/input/tui_hal_ts.h>
 #endif
+#ifdef CONFIG_SAMSUNG_TUI
+#include "stui_inf.h"
+#endif
 
 #ifdef CONFIG_SEC_SYSFS
 #include <linux/sec_sysfs.h>

@@ -690,6 +690,7 @@ static int pdic_handle_usb_external_notifier_notification(struct notifier_block 
 {
 	struct s2mm005_data *usbpd_data = dev_get_drvdata(ccic_device);
 	int ret = 0;
+	int is_src = 0;
 	int enable = *(int *)data;
 
 	pr_info("%s : action=%lu , enable=%d\n",__func__,action,enable);
@@ -706,6 +707,9 @@ static int pdic_handle_usb_external_notifier_notification(struct notifier_block 
 		break;
 	case EXTERNAL_NOTIFY_HOSTBLOCK_POST:
 		if(enable) {
+			is_src = usbpd_data->func_state & (0x1 << 25) ? 1 : 0;
+			if (is_src)
+				s2mm005_set_upsm_mode();
 		} else {
 			set_enable_alternate_mode(ALTERNATE_MODE_START);
 		}

@@ -364,6 +364,8 @@ struct himax_ts_data {
 	uint32_t pl_y_min;
 	uint32_t pl_y_max;
 
+	int comm_err_count;
+
 	int rst_gpio;
 	int use_irq;
 	int (*power) (int on);

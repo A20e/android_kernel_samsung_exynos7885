@@ -71,6 +71,9 @@ enum power_supply_ext_property {
 };
 
 enum sec_battery_usb_conf {
+#if defined(CONFIG_ENABLE_USB_SUSPEND_STATE)
+	USB_CURRENT_SUSPENDED = 1,
+#endif
 	USB_CURRENT_UNCONFIGURED = 100,
 	USB_CURRENT_HIGH_SPEED = 500,
 	USB_CURRENT_SUPER_SPEED = 900,
@@ -939,6 +942,7 @@ struct sec_battery_platform_data {
 	/* if siop level 0, set minimum fast charging current */
 	int minimum_charging_current_by_siop_0;
 	int input_current_by_siop_20;
+	int input_current_by_siop_40;
 	int charging_current_browsing_mode;
 	
 	int wc_hero_stand_cc_cv;
@@ -960,8 +964,8 @@ struct sec_battery_platform_data {
 
 	bool fake_capacity;
 
-#if defined(CONFIG_BATTERY_CISD)
 	unsigned int battery_full_capacity;
+#if defined(CONFIG_BATTERY_CISD)
 	unsigned int cisd_cap_high_thr;
 	unsigned int cisd_cap_low_thr;
 	unsigned int cisd_cap_limit;

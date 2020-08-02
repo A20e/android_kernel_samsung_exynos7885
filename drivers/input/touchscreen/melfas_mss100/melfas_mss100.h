@@ -248,6 +248,8 @@ struct mms_ts_coordinate {
 	u16 mcount;
 	int palm_count;
 	u8 left_event;
+	u8 type;
+	u8 pre_type;
 };
 
 
@@ -291,11 +293,9 @@ struct mms_ts_info {
 	u8 node_x;
 	u8 node_y;
 	u8 node_key;
-	u8 boot_ver_ic;
-	u8 core_ver_ic;
-	u8 config_ver_ic;
 	u16 fw_ver_ic;
 	u16 fw_ver_bin[8];
+	u16 fw_model_ver_ic;
 	u8 event_size;
 	int event_format;
 	u16 fw_year;
@@ -350,6 +350,12 @@ struct mms_ts_info {
 	struct mutex modechange;
 	struct delayed_work work_read_info;
 	bool info_work_done;
+
+	struct delayed_work work_print_info;
+	int noise_mode;
+	int wet_mode;
+	int print_info_cnt_open;
+	int print_info_cnt_release;
 
 	bool lowpower_mode;
 	unsigned char lowpower_flag;

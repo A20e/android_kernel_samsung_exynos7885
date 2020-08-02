@@ -637,10 +637,14 @@ static struct exynos_ss_desc ess_desc;
 DEFINE_PER_CPU(struct pt_regs *, ess_core_reg);
 DEFINE_PER_CPU(struct exynos_ss_mmu_reg *, ess_mmu_reg);
 
-static void exynos_ss_save_system(struct exynos_ss_mmu_reg *mmu_reg)
+static void exynos_ss_save_system(void *unused)
 {
+	struct exynos_ss_mmu_reg *mmu_reg;
+
 	if (!exynos_ss_get_enable("log_kevents", true))
 		return;
+
+	mmu_reg = per_cpu(ess_mmu_reg, raw_smp_processor_id());
 
 #ifdef CONFIG_ARM64
 	asm("mrs x1, SCTLR_EL1\n\t"		/* SCTLR_EL1 */
@@ -1226,7 +1230,7 @@ int exynos_ss_save_context(void *v_regs)
 
 	/* If it was already saved the context information, it should be skipped */
 	if (exynos_ss_get_core_panic_stat(smp_processor_id()) !=  ESS_SIGN_PANIC) {
-		exynos_ss_save_system(per_cpu(ess_mmu_reg, smp_processor_id()));
+		exynos_ss_save_system(NULL);
 		exynos_ss_save_core(regs);
 		exynos_ss_dump();
 		exynos_ss_set_core_panic_stat(ESS_SIGN_PANIC, smp_processor_id());
@@ -2542,6 +2546,15 @@ static int __init exynos_ss_init_dt(void)
 	return init_fn(np);
 }
 
+static int __init exynos_ss_utils_save_systems_all(void)
+{
+	smp_call_function(exynos_ss_save_system, NULL, 1);
+	exynos_ss_save_system(NULL);
+
+	return 0;
+}
+postcore_initcall(exynos_ss_utils_save_systems_all);
+
 static int __init exynos_ss_init(void)
 {
 	if (ess_base.vaddr && ess_base.paddr && ess_base.size) {
@@ -2571,6 +2584,15 @@ static int __init exynos_ss_init(void)
 #endif
 		register_reboot_notifier(&nb_reboot_block);
 		atomic_notifier_chain_register(&panic_notifier_list, &nb_panic_block);
+
+#ifdef CONFIG_SEC_DEBUG
+#ifdef CONFIG_SEC_DEBUG_SNAPSHOT_DISABLE
+		if (sec_debug_get_debug_level() == 0) {
+			exynos_ss_set_enable("log_kevents", false);
+			pr_err("%s: disabled by debug level\n", __func__);
+		}
+#endif
+#endif
 	} else
 		pr_err("exynos-snapshot: %s failed\n", __func__);
 

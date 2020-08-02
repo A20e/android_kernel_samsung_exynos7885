@@ -2714,6 +2714,23 @@ int get_vc_dma_buf_info(struct fimc_is_sensor_interface *itf,
 		return -ENODEV;
 	}
 
+#if defined(USE_MS_PDAF_INTERFACE)
+	if (csi->internal_update != true &&
+		module->vc_max_size[request_data_type].sensor_mode == VC_SENSOR_MODE_MSPD_GLOBAL_NORMAL) {
+		buf_info->stat_type = module->vc_max_size[request_data_type].stat_type;
+		buf_info->sensor_mode = module->vc_max_size[request_data_type].sensor_mode;
+		buf_info->element_size = module->vc_max_size[request_data_type].element_size;
+		buf_info->width = module->vc_max_size[request_data_type].width;
+		buf_info->height = module->vc_max_size[request_data_type].height;
+
+		dbg_sensor(2, "VC buf (req_type(%d), stat_type(%d), sensor_mode(%d), width(%d), height(%d), element(%d byte))\n",
+			request_data_type, buf_info->stat_type, buf_info->sensor_mode, buf_info->width, buf_info->height,
+			buf_info->element_size);
+
+		return 0;
+	}
+#endif
+
 	switch (request_data_type) {
 	case VC_BUF_DATA_TYPE_SENSOR_STAT1:
 	case VC_BUF_DATA_TYPE_SENSOR_STAT2:

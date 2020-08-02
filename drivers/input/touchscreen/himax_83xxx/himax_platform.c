@@ -263,6 +263,7 @@ int himax_bus_read(uint8_t command, uint8_t * data, uint32_t length,
 			break;
 
 		msleep(20);
+		private_ts->comm_err_count++;
 	}
 
 	if (retry == toRetry) {
@@ -307,6 +308,7 @@ int himax_bus_write(uint8_t command, uint8_t * data, uint32_t length,
 			break;
 
 		msleep(20);
+		private_ts->comm_err_count++;
 	}
 
 	if (retry == toRetry) {
@@ -354,6 +356,7 @@ int himax_bus_master_write(uint8_t * data, uint32_t length, uint8_t toRetry)
 			break;
 
 		msleep(20);
+		private_ts->comm_err_count++;
 	}
 
 	if (retry == toRetry) {

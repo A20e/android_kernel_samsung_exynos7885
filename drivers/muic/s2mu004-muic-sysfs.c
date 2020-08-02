@@ -29,6 +29,8 @@
 #include <linux/muic/s2mu004-muic.h>
 #include <linux/sec_sysfs.h>
 #include <linux/sec_ext.h>
+#include <linux/sec_batt.h>
+#include "../battery_v2/include/sec_charging_common.h"
 
 static ssize_t s2mu004_muic_show_uart_en(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -519,6 +521,7 @@ static ssize_t s2mu004_muic_set_afc_disable(struct device *dev,
 	struct muic_interface_t *muic_if = (struct muic_interface_t *)muic_data->if_data;
 	int mdev = 0;
 #endif /* CONFIG_MUIC_MANAGER */
+	union power_supply_propval psy_val;
 
 	mutex_lock(&muic_data->muic_mutex);
 
@@ -545,6 +548,9 @@ static ssize_t s2mu004_muic_set_afc_disable(struct device *dev,
 	pr_err("%s:set_param is NOT supported! - %02x:%02x(%d)\n",
 		__func__, param_val, curr_val, ret);
 #endif
+
+	psy_val.intval = param_val;
+	psy_do_property("battery", set, POWER_SUPPLY_EXT_PROP_HV_DISABLE, psy_val);
 
 	pr_info("%s afc_disable(%d)\n", __func__, pdata->afc_disable);
 

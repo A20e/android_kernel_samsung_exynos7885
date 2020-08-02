@@ -1349,10 +1349,13 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 
 	sensor_peri = (struct fimc_is_device_sensor_peri *)module->private_data;
 	applied_frame_num = vsync_count - sensor_peri->sensor_interface.diff_bet_sen_isp;
-	sensor_ctl = &sensor_peri->cis.sensor_ctls[applied_frame_num % CAM2P0_UCTL_LIST_SIZE];
 
 	flash = sensor_peri->flash;
 	BUG_ON(!flash);
+	
+	mutex_lock(&sensor_peri->cis.control_lock);
+
+	sensor_ctl = &sensor_peri->cis.sensor_ctls[applied_frame_num % CAM2P0_UCTL_LIST_SIZE];
 
 	if (sensor_ctl->valid_flash_udctrl == false || vsync_count != sensor_ctl->flash_frame_number)
 		goto p_err;
@@ -1398,6 +1401,7 @@ int fimc_is_sensor_peri_pre_flash_fire(struct v4l2_subdev *subdev, void *arg)
 	sensor_ctl->valid_flash_udctrl = false;
 
 p_err:
+	mutex_unlock(&sensor_peri->cis.control_lock);
 	return ret;
 }
 
@@ -1868,6 +1872,8 @@ stream_on_retry:
 			memset(&sensor_peri->cis.sensor_ctls[i].cur_cam20_sensor_udctrl, 0, sizeof(camera2_sensor_uctl_t));
 			sensor_peri->cis.sensor_ctls[i].valid_sensor_ctrl = 0;
 			sensor_peri->cis.sensor_ctls[i].force_update = false;
+			memset(&sensor_peri->cis.sensor_ctls[i].cur_cam20_flash_udctrl, 0, sizeof(camera2_flash_uctl_t));
+			sensor_peri->cis.sensor_ctls[i].valid_flash_udctrl = false;
 		}
 		sensor_peri->use_sensor_work = false;
 	}
@@ -2376,7 +2382,7 @@ int fimc_is_sensor_peri_actuator_softlanding(struct fimc_is_device_sensor_peri *
 		actuator_itf->hw_pos = soft_landing_table->hw_table[i];
 
 		/* The actuator needs a delay time when lens moving for soft landing. */
-		mdelay(soft_landing_table->step_delay);
+		msleep(soft_landing_table->step_delay);
 
 		ret = fimc_is_sensor_peri_actuator_check_move_done(device);
 		if (ret) {

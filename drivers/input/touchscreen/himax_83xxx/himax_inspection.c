@@ -2030,7 +2030,7 @@ static int hx_get_one_raw(int32_t * RAW, uint8_t checktype, uint32_t datalen)
 		if (ret) {
 			input_err(true, &private_ts->client->dev, "%s %s: himax_wait_sorting_mode FAIL\n",
 				HIMAX_LOG_TAG, __func__);
-			return ret;
+			goto END_FUNC;
 		}
 
 	himax_switch_data_type(checktype);
@@ -2038,10 +2038,11 @@ static int hx_get_one_raw(int32_t * RAW, uint8_t checktype, uint32_t datalen)
 	if (ret) {
 		input_err(true, &private_ts->client->dev, "%s %s: himax_get_rawdata FAIL\n",
 			HIMAX_LOG_TAG, __func__);
-		return ret;
+		goto END_FUNC;
 	}
 	g_dc_max = g_core_fp.fp_get_max_dc();
 
+END_FUNC:
 	input_info(true, &private_ts->client->dev, "%s %s:return normal status!\n",
 		HIMAX_LOG_TAG, __func__);
 	g_core_fp.fp_sense_off(true);
@@ -2337,6 +2338,15 @@ static void fw_update(void *dev_data)
 		container_of(sec, struct himax_ts_data, sec);
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		snprintf(buf, sizeof(buf), "%s", "OK");
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		input_info(true, &data->client->dev, "%s: user_ship, success\n", __func__);
+		return;
+	}
+#endif
 
 	input_info(true, &data->client->dev, "%s %s(), %d\n", HIMAX_LOG_TAG,
 			__func__, sec->cmd_param[0]);
@@ -2713,7 +2723,9 @@ static void get_fw_ver_ic(void *dev_data)
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING) {
 		sec_cmd_set_cmd_result_all(sec, buf, strnlen(buf, sizeof(buf)), "FW_VER_IC");
-		sec_cmd_set_cmd_result_all(sec, model, strnlen(model, sizeof(model)), "FW_MODEL");
+
+		if (data->pdata->item_version > 1)
+			sec_cmd_set_cmd_result_all(sec, model, strnlen(model, sizeof(model)), "FW_MODEL");
 	}
 	sec->cmd_state = SEC_CMD_STATUS_OK;
 
@@ -3134,7 +3146,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_rawcap_all(void *dev_data)
+static void run_rawcap_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3143,6 +3155,8 @@ static void get_rawcap_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_rawcap(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -3250,7 +3264,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_open_all(void *dev_data)
+static void run_open_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3259,6 +3273,8 @@ static void get_open_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_open(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -3367,7 +3383,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_short_all(void *dev_data)
+static void run_short_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3376,6 +3392,8 @@ static void get_short_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_short(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -3485,7 +3503,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_mic_open_all(void *dev_data)
+static void run_mic_open_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3494,6 +3512,8 @@ static void get_mic_open_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_mic_open(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -3603,7 +3623,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_noise_all(void *dev_data)
+static void run_noise_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3612,6 +3632,8 @@ static void get_noise_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_noise(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -3907,7 +3929,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_gap_y_all(void *dev_data)
+static void run_raw_gap_y_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -3917,6 +3939,8 @@ static void get_gap_y_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_gap_data_y(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -4071,7 +4095,7 @@ END_OUPUT:
 	himax_int_enable(1);
 }
 
-static void get_gap_x_all(void *dev_data)
+static void run_raw_gap_x_read_all(void *dev_data)
 {
 	char temp[SEC_CMD_STR_LEN] = { 0 };
 	char *buf = NULL;
@@ -4081,6 +4105,8 @@ static void get_gap_x_all(void *dev_data)
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
 	struct himax_ts_data *data =
 		container_of(sec, struct himax_ts_data, sec);
+
+	get_gap_data_x(sec);
 
 	sec_cmd_set_default_result(sec);
 
@@ -4198,7 +4224,10 @@ static void factory_cmd_result_all(void *dev_data)
 	get_rawcap(sec);
 	get_gap_data_x(sec);
 	get_gap_data_y(sec);
-	get_open(sec);
+
+	if (data->pdata->item_version > 1)
+		get_open(sec);
+
 	get_mic_open(sec);
 	get_short(sec);
 	get_noise(sec);
@@ -4232,22 +4261,22 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("get_x_num", get_all_x_num),},
 	{SEC_CMD("get_y_num", get_all_y_num),},
 	{SEC_CMD("get_rawcap", get_rawcap),},
-	{SEC_CMD("get_rawcap_all", get_rawcap_all),},
+	{SEC_CMD("run_rawcap_read_all", run_rawcap_read_all),},
 	{SEC_CMD("get_open", get_open),},
-	{SEC_CMD("get_open_all", get_open_all),},
+	{SEC_CMD("run_open_read_all", run_open_read_all),},
 	{SEC_CMD("get_mic_open", get_mic_open),},
-	{SEC_CMD("get_mic_open_all", get_mic_open_all),},
+	{SEC_CMD("run_mic_open_read_all", run_mic_open_read_all),},
 	{SEC_CMD("get_short", get_short),},
-	{SEC_CMD("get_short_all", get_short_all),},
+	{SEC_CMD("run_short_read_all", run_short_read_all),},
 	{SEC_CMD("get_noise", get_noise),},
-	{SEC_CMD("get_noise_all", get_noise_all),},
+	{SEC_CMD("run_noise_read_all", run_noise_read_all),},
 	{SEC_CMD("get_lp_rawcap", get_lp_rawcap),},
 	{SEC_CMD("get_lp_noise", get_lp_noise),},
 	{SEC_CMD("run_jitter_test", not_support_cmd),},
 	{SEC_CMD("get_gap_data_x", get_gap_data_x),},
-	{SEC_CMD("get_gap_x_all", get_gap_x_all),},
+	{SEC_CMD("run_raw_gap_x_read_all", run_raw_gap_x_read_all),},
 	{SEC_CMD("get_gap_data_y", get_gap_data_y),},
-	{SEC_CMD("get_gap_y_all", get_gap_y_all),},
+	{SEC_CMD("run_raw_gap_y_read_all", run_raw_gap_y_read_all),},
 	{SEC_CMD("set_tsp_test_result", not_support_cmd),},
 	{SEC_CMD("get_tsp_test_result", not_support_cmd),},
 	{SEC_CMD("clear_tsp_test_result", not_support_cmd),},
@@ -4300,13 +4329,46 @@ static ssize_t sensitivity_mode_store(struct device *dev,
 	return count;
 }
 
+static ssize_t comm_err_count_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	input_info(true, &private_ts->client->dev, "%s %s %d\n",
+			HIMAX_LOG_TAG, __func__, private_ts->comm_err_count);
+
+	return snprintf(buf, 256, "%d", private_ts->comm_err_count);
+}
+
+static ssize_t comm_err_count_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	input_info(true, &private_ts->client->dev, "%s %s clear\n",
+			HIMAX_LOG_TAG, __func__);
+
+	private_ts->comm_err_count = 0;
+	return count;
+
+}
+
+static ssize_t module_id_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, 256, "HX00%04X%04X", ic_data->vendor_fw_ver,
+			(ic_data->vendor_cid_maj_ver << 8 | ic_data->vendor_cid_min_ver));
+}
+
 static DEVICE_ATTR(sensitivity_mode, S_IRUGO | S_IWUSR | S_IWGRP,
 			sensitivity_mode_show, sensitivity_mode_store);
 static DEVICE_ATTR(close_tsp_test, S_IRUGO, show_close_tsp_test, NULL);
+static DEVICE_ATTR(comm_err_count, S_IRUGO | S_IWUSR | S_IWGRP,
+			comm_err_count_show, comm_err_count_store);
+static DEVICE_ATTR(module_id, S_IRUGO, module_id_show, NULL);
 
 static struct attribute *sec_touch_factory_attributes[] = {
 	&dev_attr_sensitivity_mode.attr,
 	&dev_attr_close_tsp_test.attr,
+	&dev_attr_comm_err_count.attr,
+	&dev_attr_module_id.attr,
 	NULL,
 };
 

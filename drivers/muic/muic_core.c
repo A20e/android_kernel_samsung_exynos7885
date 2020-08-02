@@ -906,6 +906,7 @@ bool muic_core_get_ccic_cable_state(struct muic_platform_data *muic_pdata)
 	case ATTACHED_DEV_OTG_MUIC:
 #if defined(CONFIG_MUIC_SUPPORT_PRSWAP)
 	case ATTACHED_DEV_USB_MUIC:
+	case ATTACHED_DEV_TIMEOUT_OPEN_MUIC:
 #endif
 		return true;
 	default:
@@ -927,9 +928,11 @@ int muic_core_handle_attach(struct muic_platform_data *muic_pdata,
 	muic_pdata->adc = adc;
 	muic_pdata->vbvolt = vbvolt;
 
-	ret = muic_core_handle_attached_prev_dev(muic_pdata, new_dev, &noti);
-	if (ret)
-		pr_err("%s prev_dev failed\n", __func__);
+	if (muic_pdata->attached_dev != ATTACHED_DEV_NONE_MUIC) {
+		ret = muic_core_handle_attached_prev_dev(muic_pdata, new_dev, &noti);
+		if (ret)
+			pr_err("%s prev_dev failed\n", __func__);
+	}
 
 	ret = muic_core_handle_attached_new_dev(muic_pdata, new_dev, &noti);
 	if (ret)
@@ -1110,15 +1113,16 @@ void muic_core_hv_handle_state(struct muic_platform_data *muic_pdata,
 	case HV_STATE_QC_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_charger, muic_pdata->drv_data);
 		break;
+#if !IS_ENABLED(CONFIG_MUIC_NOT_SUPPORT_QC)
 	case HV_STATE_QC_5V_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_5v_charger, muic_pdata->drv_data);
 		break;
 	case HV_STATE_QC_9V_CHARGER:
 		MUIC_PDATA_VOID_FUNC(muic_if->hv_qc_9v_charger, muic_pdata->drv_data);
 		break;
+#endif
 	default:
-		pr_err("%s not defined state : %d\n",
-				__func__, next_state);
+		pr_err("%s not defined state : %d\n", __func__, next_state);
 		break;
 	}
 }
@@ -1299,7 +1303,7 @@ struct muic_platform_data *muic_core_init(void *drv_data)
 	}
 
 	muic_pdata->drv_data = drv_data;
-	muic_pdata->attached_dev = ATTACHED_DEV_UNKNOWN_MUIC;
+	muic_pdata->attached_dev = ATTACHED_DEV_NONE_MUIC;
 	muic_pdata->cleanup_switch_dev_cb	= muic_cleanup_switch_dev_cb;
 	muic_pdata->is_usb_ready = false;
 	muic_pdata->is_factory_start = false;

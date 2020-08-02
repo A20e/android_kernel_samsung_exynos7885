@@ -214,8 +214,9 @@ void ccic_event_work(void *data, int dest, int id, int attach, int event, int su
 			} else
 				pr_info("%s detach case\n", __func__);
 		}
-		if (usbpd_data->typec_try_state_change &&
-			(event != USB_STATUS_NOTIFY_DETACH)) {
+		if ((usbpd_data->typec_try_state_change == TRY_ROLE_SWAP_DR
+			|| usbpd_data->typec_try_state_change == TRY_ROLE_SWAP_TYPE) 
+			&& (event != USB_STATUS_NOTIFY_DETACH)) {
 			// Role change try and new mode detected
 			pr_info("usb: %s, typec_reverse_completion\n", __func__);
 			complete(&usbpd_data->typec_reverse_completion);
@@ -530,19 +531,21 @@ int s2mm005_port_type_set(const struct typec_capability *cap, enum typec_port_ty
 {
 	struct s2mm005_data *usbpd_data = container_of(cap, struct s2mm005_data, typec_cap);
 	int timeout = 0;
+	int ret = 0;
 
 	if (!usbpd_data) {
 		pr_err("%s : usbpd_data is null\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto skip;
 	}
 
-	pr_info("%s : typec_power_role=%d, typec_data_role=%d, port_type=%d\n",
+	pr_info("%s +: typec_power_role=%d, typec_data_role=%d, port_type=%d\n",
 		__func__, usbpd_data->typec_power_role, usbpd_data->typec_data_role, port_type);
 
 	switch (port_type) {
 	case TYPEC_PORT_DFP:
 		pr_info("%s : try reversing, from UFP(Sink) to DFP(Source)\n", __func__);
-		usbpd_data->typec_try_state_change = TYPE_C_ATTACH_DFP;
+		usbpd_data->typec_try_state_change = TRY_ROLE_SWAP_TYPE;
 		s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DFP);
 		break;
 	case TYPEC_PORT_UFP:
@@ -554,19 +557,22 @@ int s2mm005_port_type_set(const struct typec_capability *cap, enum typec_port_ty
 			CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_ATTACH,
 			0/*attach*/, 0/*rprd*/, 0);
 #endif
-		usbpd_data->typec_try_state_change = TYPE_C_ATTACH_UFP;
+		usbpd_data->typec_try_state_change = TRY_ROLE_SWAP_TYPE;
 		s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_UFP);
 		break;
 	case TYPEC_PORT_DRP:
 		pr_info("%s : set to DRP\n", __func__);
-//		usbpd_data->typec_try_state_change = 0;
-//		s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DRP);
-		return 0;
+		usbpd_data->typec_try_state_change = TRY_ROLE_SWAP_NONE;
+		s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DRP);
+		goto skip;
 	default :
 		pr_info("%s : invalid typec_role\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto skip;
 	}
 
+	pr_info("%s typec_try_state_change=%d\n", __func__, usbpd_data->typec_try_state_change);
+	
 	if (usbpd_data->typec_try_state_change) {
 		reinit_completion(&usbpd_data->typec_reverse_completion);
 		timeout =
@@ -578,17 +584,20 @@ int s2mm005_port_type_set(const struct typec_capability *cap, enum typec_port_ty
 			pr_err("%s: reverse failed, set mode to DRP\n", __func__);
 			disable_irq(usbpd_data->irq);
 			/* exit from Disabled state and set mode to DRP */
-			usbpd_data->typec_try_state_change = 0;
+			usbpd_data->typec_try_state_change = TRY_ROLE_SWAP_NONE;
 			s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DRP);
 			enable_irq(usbpd_data->irq);
-			return -EIO;
+			ret = -EIO;
+			goto skip;
 		} else {
 			pr_err("%s: reverse success, one more check\n", __func__);
 			schedule_delayed_work(&usbpd_data->typec_role_swap_work, msecs_to_jiffies(DUAL_ROLE_SET_MODE_WAIT_MS));
 		}
 	}
 
-	return 0;
+skip:
+	pr_info("%s -\n", __func__);
+	return ret;
 }
 
 int s2mm005_get_pd_support(struct s2mm005_data *usbpd_data)
@@ -877,6 +886,10 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 				dev_info(&i2c->dev, "%s No DFP! is_dfp:%d\n", __func__, is_dfp);
 				return;
 			}
+			/*for case after smart switch CtoC, device doesn't recharge*/
+			else if (usbpd_data->pd_state == State_PE_SRC_Send_Capabilities && usbpd_data->is_host == HOST_ON_BY_RD)
+				usbpd_data->is_host = HOST_OFF;
+			
 			if (usbpd_data->is_client == CLIENT_ON) {
 				dev_info(&i2c->dev, "%s %d: pd_state:%02d, turn off client\n",
 							__func__, __LINE__, usbpd_data->pd_state);
@@ -920,12 +933,11 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 				ptn36502_config(USB3_ONLY_MODE, DFP);
 #endif
 				/* add to turn on external 5V */
+				vbus_turn_on_ctrl(1);
 #if defined(CONFIG_USB_HOST_NOTIFY)
 				if (is_blocked(o_notify, NOTIFY_BLOCK_TYPE_HOST))
 					s2mm005_set_upsm_mode();
-				else
 #endif
-					vbus_turn_on_ctrl(1);
 #if defined(CONFIG_CCIC_ALTERNATE_MODE)
 				// only start alternate mode at DFP state
 //				send_alternate_message(usbpd_data, VDM_DISCOVER_ID);
@@ -1076,8 +1088,9 @@ void process_cc_attach(void * data,u8 *plug_attach_done)
 			if (!usbpd_data->try_state_change)
 				s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DRP);
 #elif defined(CONFIG_TYPEC)
-			if (!usbpd_data->typec_try_state_change)
+			if (!usbpd_data->typec_try_state_change) {
 				s2mm005_rprd_mode_change(usbpd_data, TYPE_C_ATTACH_DRP);
+			}
 #endif
 		}
 	}
@@ -1233,6 +1246,33 @@ void process_cc_get_int_status(void *data, uint32_t *pPRT_MSG, MSG_IRQ_STATUS_Ty
 						USB_STATUS_NOTIFY_ATTACH_DFP/*drp*/, 0);
 				usbpd_data->is_host = HOST_ON_BY_RD;
 				usbpd_data->is_client = CLIENT_OFF;
+			} else {
+				/* both of host and device not worked case. 
+				    rebooting case with dex connection */
+				   
+				    if (is_dfp) {
+						pr_info("%s: all usb off case : is dfp=%d : run usb host \n", __func__, is_dfp);
+						ccic_event_work(usbpd_data, CCIC_NOTIFY_DEV_MUIC,
+							CCIC_NOTIFY_ID_ATTACH, 1/*attach*/, 1/*rprd*/,0);
+						ccic_event_work(usbpd_data,
+								CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
+								1/*attach*/,
+								USB_STATUS_NOTIFY_ATTACH_DFP/*drp*/, 0);
+						usbpd_data->is_host = HOST_ON_BY_RD;
+						usbpd_data->is_client = CLIENT_OFF;					
+				    } else {
+				    		pr_info("%s: all usb off case : is dfp=%d : run usb client \n", __func__, is_dfp);
+						ccic_event_work(usbpd_data,
+							CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_ATTACH,
+							1/*attach*/, 0/*rprd*/,0);
+						ccic_event_work(usbpd_data,
+								CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
+								1/*attach*/, USB_STATUS_NOTIFY_ATTACH_UFP/*drp*/, 0);
+						usbpd_data->is_host = HOST_OFF;
+						usbpd_data->is_client = CLIENT_ON;
+
+				    }
+		
 			}
 #if defined(CONFIG_CCIC_ALTERNATE_MODE)
 		}

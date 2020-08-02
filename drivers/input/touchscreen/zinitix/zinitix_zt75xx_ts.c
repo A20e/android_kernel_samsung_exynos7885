@@ -208,6 +208,7 @@ struct reg_ioctl {
 #define TOUCH_JITTER_MODE			15
 #define TOUCH_SELF_DND_MODE			17
 #define TOUCH_SENTIVITY_MEASUREMENT_MODE	21
+#define TOUCH_CHARGE_PUMP_MODE			25
 #define TOUCH_REF_ABNORMAL_TEST_MODE		33
 #define DEF_RAW_SELF_SSR_DATA_MODE		39	/* SELF SATURATION RX */
 #define DEF_RAW_SELF_SFR_UNIT_DATA_MODE		40
@@ -481,6 +482,7 @@ struct tsp_raw_data {
 	s16 jitter_data[TSP_CMD_NODE_NUM];
 	s16 reference_data[TSP_CMD_NODE_NUM];
 	s16 reference_data_abnormal[TSP_CMD_NODE_NUM];
+	s16 charge_pump_data[TSP_CMD_NODE_NUM];
 	u16 channel_test_data[5];
 };
 
@@ -2456,7 +2458,7 @@ void trustedui_mode_off(void){
 EXPORT_SYMBOL(trustedui_mode_off);
 #endif
 
-void location_detect(struct bt532_ts_info *info, char *loc, int x, int y)
+static void location_detect(struct bt532_ts_info *info, char *loc, int x, int y)
 {
 	memset(loc, 0x00, 7);
 	strncpy(loc, "xy:", 3);
@@ -3402,6 +3404,15 @@ static void fw_update(void *device_data)
 	int ret;
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == 1) {
+		sec->cmd_state = 2;
+		snprintf(result, sizeof(result) , "%s", "OK");
+		sec_cmd_set_cmd_result(sec, result, strnlen(result, sizeof(result)));
+		input_info(true, &client->dev, "%s: user_ship, success\n", __func__);
+		return;
+	}
+#endif
 
 	switch (sec->cmd_param[0]) {
 	case BUILT_IN:
@@ -3550,11 +3561,18 @@ static void get_fw_ver_bin(void *device_data)
 	offset = ((u16)(fw_data[0x62] << 8) | fw_data[0x63]) + 0x22;
 	ic_revision = fw_data[offset];
 	ic_revision = 0;
-	version = (u32)((u32)(ic_revision & 0xff) << 24) | ((fw_version & 0xf) << 20)
-				| ((fw_minor_version & 0xf) << 16)
-				| ((hw_id & 0xff) << 8) | (reg_version & 0xff);
 
-	snprintf(buff, sizeof(buff), "ZI%08X", version);
+	if ((info->pdata->item_version >= 1) && (info->pdata->item_version <= 4)) {
+		version = (u32)((u32)(hw_id & 0xff) << 16) | ((fw_version & 0xf ) << 12)
+					| ((fw_minor_version & 0xf) << 8) | (reg_version & 0xff);
+		snprintf(buff, sizeof(buff), "ZI%06X", version);
+	} else {
+		version = (u32)((u32)(ic_revision & 0xff) << 24) | ((fw_version & 0xf) << 20)
+					| ((fw_minor_version & 0xf) << 16)
+					| ((hw_id & 0xff) << 8) | (reg_version & 0xff);
+		snprintf(buff, sizeof(buff), "ZI%08X", version);
+	}
+
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
 		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "FW_VER_BIN");
@@ -3615,13 +3633,25 @@ static void get_fw_ver_ic(void *device_data)
 	ic_revision=  info->cap_info.ic_revision;
 	ic_revision = 0;
 	vendor_id = ntohs(info->cap_info.vendor_id);
-	version = (u32)((u32)(ic_revision & 0xff) << 24) | ((fw_version & 0xf) << 20)
-				| ((fw_minor_version & 0xf) << 16)
-				| ((hw_id & 0xff) << 8) | (reg_version & 0xff);
+
+	if ((info->pdata->item_version >= 1) && (info->pdata->item_version <= 4)) {
+		version = (u32)((u32)(hw_id & 0xff) << 16) | ((fw_version & 0xf) << 12)
+					| ((fw_minor_version & 0xf) << 8) | (reg_version & 0xff);
+	} else {
+		version = (u32)((u32)(ic_revision & 0xff) << 24) | ((fw_version & 0xf) << 20)
+					| ((fw_minor_version & 0xf) << 16)
+					| ((hw_id & 0xff) << 8) | (reg_version & 0xff);
+	}
 
 	length = sizeof(vendor_id);
 	snprintf(buff, length + 1, "%s", (u8 *)&vendor_id);
-	snprintf(buff + length, sizeof(buff) - length, "%08X", version);
+
+	if ((info->pdata->item_version >= 1) && (info->pdata->item_version <= 4)) {
+		snprintf(buff + length, sizeof(buff) - length, "%06X", version);
+	} else {
+		snprintf(buff + length, sizeof(buff) - length, "%08X", version);
+	}
+
 	snprintf(model, length + 1, "%s", (u8 *)&vendor_id);
 	snprintf(model + length, sizeof(model) - length, "%04X", version >> 16);
 
@@ -5493,6 +5523,55 @@ out:
 				sec_cmd_set_cmd_result_all(sec, rx_buff, strnlen(rx_buff, sizeof(rx_buff)), "SELF_DND_TX");
 			sec_cmd_set_cmd_result_all(sec, rx_buff, strnlen(rx_buff, sizeof(rx_buff)), "SELF_DND_RX");
 		}
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	}
+	input_info(true, &client->dev, "%s: \"%s\"(%d)\n", __func__, sec->cmd_result,
+				(int)strlen(sec->cmd_result));
+
+#if ESD_TIMER_INTERVAL
+	esd_timer_start(CHECK_ESD_TIMER, misc_info);
+	write_reg(client, BT532_PERIODICAL_INTERRUPT_INTERVAL,
+		SCAN_RATE_HZ * ESD_TIMER_INTERVAL);
+#endif
+	return;
+}
+
+static void run_charge_pump_read(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct bt532_ts_info *info = container_of(sec, struct bt532_ts_info, sec);
+	struct i2c_client *client = info->client;
+	struct tsp_raw_data *raw_data = info->raw_data;
+	char buff[SEC_CMD_STR_LEN] = { 0 };
+	int ret;
+
+#if ESD_TIMER_INTERVAL
+	esd_timer_stop(misc_info);
+	write_reg(client, BT532_PERIODICAL_INTERRUPT_INTERVAL, 0);
+	write_cmd(client, BT532_CLEAR_INT_STATUS_CMD);
+#endif
+	sec_cmd_set_default_result(sec);
+
+	ret = ts_set_touchmode(TOUCH_CHARGE_PUMP_MODE);
+	if (ret < 0) {
+		ts_set_touchmode(TOUCH_POINT_MODE);
+		goto out;
+	}
+	get_raw_data(info, (u8 *)raw_data->charge_pump_data, 1);
+	ts_set_touchmode(TOUCH_POINT_MODE);
+
+	snprintf(buff, sizeof(buff), "%d,%d", raw_data->charge_pump_data[0], raw_data->charge_pump_data[0]);
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "CHARGE_PUMP");
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+
+out:
+	if (ret < 0) {
+		snprintf(buff, sizeof(buff), "%s", "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+			sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "CHARGE_PUMP");
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
 	}
 	input_info(true, &client->dev, "%s: \"%s\"(%d)\n", __func__, sec->cmd_result,
@@ -8256,8 +8335,14 @@ static void factory_cmd_result_all(void *device_data)
 		run_hfdnd_h_gap_read(sec);
 		run_selfdnd_read(sec);
 		run_selfdnd_h_gap_read(sec);
-		run_self_saturation_read(sec);
-		run_trxshort_read(sec);
+		if (pdata->mis_cal_check) {
+#ifdef TCLM_CONCEPT
+			run_mis_cal_read(sec);
+#endif
+		} else {
+			run_self_saturation_read(sec);
+			run_trxshort_read(sec);
+		}
 		break;
 	case 6:
 		run_dnd_v_gap_read(sec);
@@ -8266,6 +8351,7 @@ static void factory_cmd_result_all(void *device_data)
 		run_selfdnd_v_gap_read(sec);
 		run_selfdnd_h_gap_read(sec);
 		run_self_saturation_read(sec);
+		run_charge_pump_read(sec);
 #ifdef TCLM_CONCEPT
 		run_mis_cal_read(sec);
 #endif
@@ -9012,6 +9098,7 @@ static struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("factory_cmd_result_all", factory_cmd_result_all),},
 	{SEC_CMD("check_connection", check_connection),},
 	{SEC_CMD("run_prox_intensity_read_all", run_prox_intensity_read_all),},
+	{SEC_CMD("run_charge_pump_read", run_charge_pump_read),},
 	{SEC_CMD("not_support_cmd", not_support_cmd),},
 };
 
@@ -10414,6 +10501,7 @@ void bt532_ts_shutdown(struct i2c_client *client)
 }
 
 #ifdef CONFIG_SAMSUNG_TUI
+#ifndef CONFIG_TOUCHSCREEN_IST4050
 extern int stui_i2c_lock(struct i2c_adapter *adap);
 extern int stui_i2c_unlock(struct i2c_adapter *adap);
 
@@ -10463,6 +10551,7 @@ int stui_tsp_exit(void)
 
 	return ret;
 }
+#endif
 #endif
 
 #ifdef CONFIG_PM

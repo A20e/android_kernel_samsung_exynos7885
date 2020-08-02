@@ -522,7 +522,9 @@ static void muic_fake_event_work(struct work_struct *work)
 
 	typec_manager.muic_fake_event_wq_processing = 0;
 
-	if( typec_manager.ccic_rid_state == RID_523K ||  typec_manager.ccic_rid_state == RID_619K
+	if( typec_manager.ccic_rid_state == RID_523K
+		|| typec_manager.ccic_rid_state == RID_619K
+		|| typec_manager.ccic_rid_state == RID_301K
 		|| typec_manager.cable_type == MANAGER_NOTIFY_MUIC_UART
 		|| typec_manager.ccic_drp_state == USB_STATUS_NOTIFY_ATTACH_DFP 
 		|| typec_manager.vbus_state == STATUS_VBUS_HIGH) {

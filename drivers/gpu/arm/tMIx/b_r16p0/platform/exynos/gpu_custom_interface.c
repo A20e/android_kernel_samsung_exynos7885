@@ -1178,7 +1178,7 @@ static ssize_t show_trace_dump(struct device *dev, struct device_attribute *attr
 		ret += snprintf(buf+ret, PAGE_SIZE-ret, "%s\n", buffer);
 
         if (ret >= PAGE_SIZE - 1)
-             break;
+            break;
 
 		start = (start + 1) & KBASE_TRACE_MASK;
 	}

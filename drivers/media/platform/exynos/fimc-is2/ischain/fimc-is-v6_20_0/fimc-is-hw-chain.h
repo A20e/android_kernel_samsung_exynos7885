@@ -46,21 +46,31 @@ enum sysreg_is_reg_field {
 #define FIMC_IS_TAAISP_SIZE             (0x00500000)    /* 5MB */
 #define FIMC_IS_VRA_SIZE                (0x00800000)    /* 8MB */
 
-#if defined(SAMSUNG_LIVE_OUTFOCUS) || defined(ENABLE_REMOSAIC_CAPTURE)
-#if defined(USE_AP_PDAF)
-#define FIMC_IS_HEAP_SIZE		(0x02D00000)	/* 45MB */
+/* DDK HEAP SIZE */
+/*********************************************************************************** 
+ * - HEAP_SIZE_VENDOR_DEFINE : define a specific heap size in the vendor config
+ ***********************************************************************************/
+#ifdef HEAP_SIZE_VENDOR_DEFINE
+#define FIMC_IS_HEAP_SIZE		HEAP_SIZE_VENDOR_DEFINE
 #else
+#if defined(USE_AP_PDAF) && defined(ENABLE_REMOSAIC_CAPTURE)
+#define FIMC_IS_HEAP_SIZE		(0x02D00000)	/* 45MB */
+#elif defined(USE_AP_PDAF) && defined(SAMSUNG_LIVE_OUTFOCUS)
+#define FIMC_IS_HEAP_SIZE		(0x02D00000)	/* 45MB */
+#elif defined(SAMSUNG_LIVE_OUTFOCUS)
 #define FIMC_IS_HEAP_SIZE		(0x02800000)	/* 40MB */
-#endif
+#elif defined(USE_AP_PDAF) || defined(ENABLE_REMOSAIC_CAPTURE)
+#define FIMC_IS_HEAP_SIZE		(0x02300000)	/* 35MB */
 #else
 #define FIMC_IS_HEAP_SIZE		(0x01900000)	/* 25MB */
 #endif
+#endif /* HEAP_SIZE_VENDOR_DEFINE */
 #endif /* DDK_USE_SMALL_MEMORY */
 
 //#define FIMC_IS_RESERVE_LIB_SIZE      (0)             /* Not Used */
 #define FIMC_IS_RESERVE_LIB_SIZE        (0x00100000)    /* 1MB RTA HEAP */
-#define SYSREG_IS_BASE_ADDR		0x14510000
-#define HWFC_INDEX_RESET_ADDR			0x14641050
+#define SYSREG_IS_BASE_ADDR              0x14510000
+#define HWFC_INDEX_RESET_ADDR            0x14641050
 
 enum taaisp_chain_id {
 	ID_3AA_0 = 0,

@@ -62,6 +62,7 @@ extern void sec_initcall_debug_add(initcall_t fn, unsigned long long t);
 #define sec_initcall_debug_add(a,b)		do { } while(0)	
 #endif /* CONFIG_SEC_INITCALL_DEBUG */
 
+
 /*
  * Param op.
  */

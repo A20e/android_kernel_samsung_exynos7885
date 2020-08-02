@@ -97,6 +97,7 @@
 #define USE_SENSOR_IF_DPHY
 #undef ENABLE_CLOCK_GATE
 /* #define ENABLE_DIRECT_CLOCK_GATE */
+#define ENABLE_HMP_BOOST
 
 /*
  * =================================================================================================
